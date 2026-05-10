@@ -1,0 +1,102 @@
+# SocialAI Service - Docker Compose 开发环境
+
+services:
+  # PostgreSQL 数据库
+  postgres:
+    image: postgres:15-alpine
+    container_name: socialai-postgres
+    environment:
+      POSTGRES_USER: socialai
+      POSTGRES_PASSWORD: socialai_dev_password
+      POSTGRES_DB: socialai_dev
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U socialai"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  # Redis 缓存和消息队列
+  redis:
+    image: redis:7-alpine
+    container_name: socialai-redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  # Celery Worker (处理定时任务)
+  celery-worker:
+    build:
+      context: ./api
+      dockerfile: Dockerfile
+    container_name: socialai-celery-worker
+    command: celery -A tasks.publish.celery_app worker --loglevel=info --concurrency=2
+    depends_on:
+      - redis
+      - postgres
+    environment:
+      - DATABASE_URL=postgresql://socialai:socialai_dev_password@postgres:5432/socialai_dev
+      - REDIS_URL=redis://redis:6379/0
+    volumes:
+      - ./api:/app
+
+  # Celery Beat (定时任务调度器)
+  celery-beat:
+    build:
+      context: ./api
+      dockerfile: Dockerfile
+    container_name: socialai-celery-beat
+    command: celery -A tasks.publish.celery_app beat --loglevel=info
+    depends_on:
+      - redis
+      - postgres
+    environment:
+      - DATABASE_URL=postgresql://socialai:socialai_dev_password@postgres:5432/socialai_dev
+      - REDIS_URL=redis://redis:6379/0
+    volumes:
+      - ./api:/app
+
+  # FastAPI 后端
+  api:
+    build:
+      context: ./api
+      dockerfile: Dockerfile
+    container_name: socialai-api
+    ports:
+      - "8000:8000"
+    depends_on:
+      - postgres
+      - redis
+    environment:
+      - DATABASE_URL=postgresql://socialai:socialai_dev_password@postgres:5432/socialai_dev
+      - REDIS_URL=redis://redis:6379/0
+    volumes:
+      - ./api:/app
+
+  # Vite 前端
+  frontend:
+    image: node:20-alpine
+    container_name: socialai-frontend
+    working_dir: /app
+    command: npm run dev -- --host
+    ports:
+      - "5173:5173"
+    depends_on:
+      - api
+    volumes:
+      - ./frontend:/app
+    environment:
+      - VITE_API_URL=http://localhost:8000
+
+volumes:
+  postgres_data:
+  redis_data:

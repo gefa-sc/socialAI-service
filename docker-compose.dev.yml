@@ -1,0 +1,64 @@
+# SocialAI Service - 开发环境Docker Compose
+
+version: '3.8'
+
+services:
+  # PostgreSQL数据库
+  postgres:
+    image: postgres:15-alpine
+    container_name: socialai-postgres-dev
+    environment:
+      POSTGRES_USER: socialai
+      POSTGRES_PASSWORD: socialai_dev_password
+      POSTGRES_DB: socialai_dev
+    ports:
+      - "127.0.0.1:5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U socialai"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  # Redis缓存
+  redis:
+    image: redis:7-alpine
+    container_name: socialai-redis-dev
+    ports:
+      - "127.0.0.1:6379:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  # 后端API
+  api:
+    build:
+      context: ./api
+      dockerfile: Dockerfile.dev
+    container_name: socialai-api-dev
+    ports:
+      - "8000:8000"
+    environment:
+      - DATABASE_URL=postgresql://socialai:socialai_dev_password@postgres:5432/socialai_dev
+      - REDIS_URL=redis://redis:6379
+      - ENVIRONMENT=development
+    volumes:
+      - ./api:/app
+      - /app/venv  # 排除虚拟目录
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    command: uvicorn main:app --reload --host 0.0.0.0 --port 8000
+    stdin_open: true
+    tty: true
+
+volumes:
+  postgres_data:
+  redis_data:
